@@ -12,6 +12,7 @@
 --   NV3D_DEMO_COLORS  GIF palette size (default: 128; fewer = smaller file)
 --   NV3D_DEMO_HOVER_KEYS  keys that open the LSP hover window (default: <Space>i)
 --   NV3D_DEMO_FONT    font family (default: MesloLGS NF; falls back to monospace)
+--   NV3D_DEMO_DEPTH   character depth in line heights (default: 0.45)
 
 local script_dir = debug.getinfo(1, 'S').source:match('^@(.*/)') or './'
 local SOURCE = os.getenv('NV3D_DEMO_SOURCE') or (script_dir .. 'hello.cpp')
@@ -27,7 +28,9 @@ nv3d.set {
   -- A Nerd Font, for the icons used by the completion menu, statusline etc.
   font = os.getenv('NV3D_DEMO_FONT') or 'MesloLGS NF',
   font_size = 16,  -- 12 pt (16 px at 96 DPI), where MesloLGS looks its best
-  depth = 0.25,
+  -- How far characters are extruded, in line heights (NeoVim3D's default is
+  -- 0.12); deeper glyphs catch more light on their sides and "pop" more.
+  depth = tonumber(os.getenv('NV3D_DEMO_DEPTH') or '0.45'),
   smoothing = 2,   -- slow, gliding camera
   cursor_blink = false,
   -- Aim a little above the cursor, so the lines already written
@@ -61,9 +64,9 @@ math.randomseed(3)
 local function type_text(text)
   for ch in text:gmatch(utf8.charpattern) do
     keys(ch == '<' and '<lt>' or ch)
-    local d = 0.019 + math.random() * 0.021
-    if ch == ';' or ch == '{' or ch == '}' then d = d + 0.07 end
-    if ch == ' ' and math.random() < 0.15 then d = d + 0.05 end
+    local d = 0.035 + math.random() * 0.04
+    if ch == ';' or ch == '{' or ch == '}' then d = d + 0.12 end
+    if ch == ' ' and math.random() < 0.15 then d = d + 0.08 end
     wait(d)
   end
 end
@@ -94,7 +97,7 @@ local function type_program(source)
   for line in (source:gsub('\n$', '') .. '\n'):gmatch('(.-)\n') do
     if not first then
       keys(NEWLINE)
-      wait(0.14 + math.random() * 0.08)
+      wait(0.25 + math.random() * 0.12)
     end
     first = false
     sample_cursor() -- start of the line
@@ -121,11 +124,11 @@ local function scenario()
   keys('<Esc>')
   wait(0.5)
 
-  -- Ask clangd about std::vector: its hover window is a floating window,
-  -- so it gets its own grid, lifted towards the camera.
-  keys('7G')
+  -- Ask clangd about std::cout (line 4): its hover window is a floating
+  -- window, so it gets its own grid, lifted towards the camera.
+  keys('4G')
   wait(0.35)
-  keys('fv')
+  keys('fc')
   wait(0.5)
   keys(HOVER_KEYS)
   wait(0.5)
@@ -134,8 +137,8 @@ local function scenario()
   -- A quick glide, then a steady hold: still frames are cheap to encode,
   -- a moving panel full of fine text is not.
   nv3d.set('smoothing', 5)
-  nv3d.set('follow_offset', { 21, -9 })
-  nv3d.camera.set { yaw = 26, pitch = 16, distance = home.distance * 1.05 }
+  nv3d.set('follow_offset', { 9, -4 })
+  nv3d.camera.set { yaw = 26, pitch = 16, distance = home.distance * 0.55 }
   wait(2.8)
   nv3d.set('smoothing', 2)
   keys('G') -- moving the cursor closes the hover window
@@ -150,9 +153,9 @@ local function scenario()
   local cx, cy, cz = nv3d.cursor()
   nv3d.set('follow_cursor', false)
   nv3d.camera.set {
-    yaw = -14, pitch = 12, distance = home.distance * 0.45,
+    yaw = -14, pitch = 12, distance = home.distance * 0.52,
     -- Centred on the "written" message that follows (~40 characters).
-    target = { x = cx + 11, y = cy + 1.5, z = cz },
+    target = { x = cx + 8, y = cy + 1.5, z = cz },
   }
   wait(0.9)
   type_text(command)
@@ -164,7 +167,7 @@ local function scenario()
   nv3d.set('follow_cursor', false)
   nv3d.set('smoothing', 1.2)
   nv3d.camera.set {
-    yaw = 16, pitch = -10, distance = home.distance * 0.62,
+    yaw = 16, pitch = -10, distance = home.distance * 0.45,
     target = { x = (bounds.x0 + bounds.x1) / 2, y = (bounds.y0 + bounds.y1) / 2, z = bounds.z },
   }
   wait(3)

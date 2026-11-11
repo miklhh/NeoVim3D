@@ -203,13 +203,13 @@ smoothly however long each frame took to render, and scripted keys sent with
 The animation at the top of this README is produced by a script:
 
 ```sh
-examples/demo/record.sh            # writes docs/demo.webp (~9 MB, 24 fps, 24 s)
+examples/demo/record.sh            # writes docs/demo.webp (~4 MB, 24 fps, 21 s)
 examples/demo/record.sh demo.mp4   # or a GIF / an .mp4
 ```
 
 [`examples/demo/demo.lua`](examples/demo/demo.lua) types
 [`hello.cpp`](examples/demo/hello.cpp) with natural pacing while the camera
-follows the cursor, opens the LSP hover window on `std::vector` (a floating
+follows the cursor, opens the LSP hover window on `std::cout` (a floating
 window, so it hovers on its own layer while the camera swings round), saves
 with `:w hello-world.cpp` on the command line, and pulls back to show the
 whole program. The script checks that the saved file matches the source.
