@@ -22,6 +22,7 @@ void usage() {
         "  --config <file>   Frontend Lua config (default: ~/.config/neovim3d/init.lua)\n"
         "  --clean-3d        Do not load the frontend Lua config\n"
         "  --screenshot-3d <file.png>  Render, save a screenshot and exit\n"
+        "  --size-3d <WxH>   Initial window size (default 1280x800)\n"
         "  --help-3d         Show this help\n"
         "  --version-3d      Show the NeoVim3D version\n"
         "\n"
@@ -50,6 +51,12 @@ int main(int argc, char** argv) {
             cfg.config_path = argv[++i];
         } else if (a == "--screenshot-3d" && i + 1 < argc) {
             cfg.screenshot_path = argv[++i];
+        } else if (a == "--size-3d" && i + 1 < argc) {
+            if (std::sscanf(argv[++i], "%dx%d", &cfg.window_width, &cfg.window_height) != 2 ||
+                cfg.window_width < 100 || cfg.window_height < 100) {
+                std::fprintf(stderr, "neovim3d: --size-3d expects WIDTHxHEIGHT, e.g. 1280x720\n");
+                return 2;
+            }
         } else if (a == "--clean-3d") {
             cfg.load_config = false;
         } else if (a == "--help-3d" || a == "-h" || a == "--help") {

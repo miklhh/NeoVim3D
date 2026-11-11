@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 
 #include "check.hpp"
 #include "lua_api.hpp"
@@ -23,6 +25,19 @@ struct FakeHost : LuaHost {
     void nvim_exec_lua(const std::string&) override {}
     void message(const std::string& m, bool) override { messages.push_back(m); }
     void request_redraw() override {}
+    bool record_start(const RecordOptions& o, std::string&) override {
+        record_opts = o;
+        rec = true;
+        return true;
+    }
+    bool record_stop(std::string&) override {
+        rec = false;
+        return true;
+    }
+    bool recording() override { return rec; }
+    void quit() override { quit_called = true; }
+    RecordOptions record_opts;
+    bool rec = false, quit_called = false;
 };
 
 }  // namespace
@@ -36,8 +51,13 @@ TEST(lua_options) {
     CHECK_EQ(host.opt.font, std::string("Fira Code"));
     CHECK(!host.opt.panels);
     CHECK_EQ(host.opt.light_dir.z, 1.0f);
-    CHECK_EQ(host.options_changed_calls, 2);
+    CHECK(lua.exec("nv3d.set('follow_offset', {-2, 3})"));
+    CHECK_EQ(host.opt.follow_offset.x, -2.0f);
+    CHECK_EQ(host.opt.follow_offset.y, 3.0f);
+    CHECK_EQ(host.opt.follow_offset.z, 0.0f);
+    CHECK_EQ(host.options_changed_calls, 3);
     CHECK(lua.exec("assert(nv3d.get('depth') == 0.5)"));
+    CHECK(lua.exec("assert(nv3d.get('follow_offset')[2] == 3)"));
     // Unknown options are reported as errors, not crashes.
     CHECK(!lua.exec("nv3d.set('nope', 1)"));
     CHECK(!host.messages.empty());
@@ -187,4 +207,110 @@ TEST(cinema_custom_shots_and_errors) {
     CHECK(lua.exec("nv3d.cinema.start{ shots = 'spin', follow = 1, follow_rate = 5, transition = 1 }"));
     run_frames(lua, host, 5, t);
     CHECK(std::abs(host.cam.goal.target.x - 1) < 1e-2f && std::abs(host.cam.goal.target.y - 2) < 1e-2f);
+}
+
+TEST(lua_record_api) {
+    FakeHost host;
+    LuaEngine lua(host);
+    CHECK(lua.exec("nv3d.record.start{ path = 'out.gif', fps = 25, width = 800, colors = 64 }"));
+    CHECK_EQ(host.record_opts.colors, 64);
+    CHECK(host.rec);
+    CHECK_EQ(host.record_opts.path, std::string("out.gif"));
+    CHECK_EQ(host.record_opts.fps, 25);
+    CHECK_EQ(host.record_opts.width, 800);
+    CHECK(lua.exec("nv3d.record.start{ path = 'out.webp', quality = 50, method = 6, sharp_yuv = false }"));
+    CHECK_EQ(host.record_opts.quality, 50);
+    CHECK_EQ(host.record_opts.method, 6);
+    CHECK(!host.record_opts.sharp_yuv);
+    CHECK(lua.exec("assert(nv3d.record.active()); nv3d.record.stop(); assert(not nv3d.record.active())"));
+    CHECK(lua.exec("nv3d.record.start('plain.mp4')"));
+    CHECK_EQ(host.record_opts.fps, 20);
+    CHECK(!lua.exec("nv3d.record.start{}"));  // path is required
+    CHECK(lua.exec("nv3d.quit()"));
+    CHECK(host.quit_called);
+}
+
+TEST(recorder_ffmpeg_command) {
+    RecordOptions o;
+    o.path = "it's a demo.gif";
+    o.width = 640;
+    std::string gif = Recorder::command(o, 1280, 800);
+    CHECK(gif.find("-video_size 1280x800") != std::string::npos);
+    CHECK(gif.find("palettegen=stats_mode=diff:max_colors=256") != std::string::npos);
+    CHECK(gif.find("scale=640:-2") != std::string::npos);
+    CHECK(gif.find("'it'\\''s a demo.gif'") != std::string::npos);  // shell-quoted
+    o.path = "demo.mp4";
+    o.width = 0;
+    std::string mp4 = Recorder::command(o, 1280, 800);
+    CHECK(mp4.find("palettegen") == std::string::npos);
+    CHECK(mp4.find("yuv420p") != std::string::npos);
+}
+
+TEST(recorder_resize_rgb) {
+    // 4x2 bottom-up image: bottom row white, top row black. Halving it and
+    // flipping gives a 2x1 image that averages both rows.
+    std::vector<uint8_t> src(4 * 2 * 3, 0);
+    std::fill(src.begin(), src.begin() + 4 * 3, uint8_t(255));
+    std::vector<uint8_t> dst(2 * 1 * 3);
+    resize_rgb(src.data(), 4, 2, true, dst.data(), 2, 1);
+    for (uint8_t v : dst) CHECK(v == 127 || v == 128);
+    // Same size + flip just turns it upside down.
+    std::vector<uint8_t> same(src.size());
+    resize_rgb(src.data(), 4, 2, true, same.data(), 4, 2);
+    CHECK_EQ(int(same[0]), 0);
+    CHECK_EQ(int(same[4 * 3]), 255);
+    // Non-integer downscale keeps a flat colour flat.
+    std::vector<uint8_t> grey(10 * 6 * 3, 77), small(4 * 2 * 3);
+    resize_rgb(grey.data(), 10, 6, false, small.data(), 4, 2);
+    for (uint8_t v : small) CHECK_EQ(int(v), 77);
+}
+
+TEST(recorder_writes_animated_webp) {
+    if (!Recorder::webp_supported()) {
+        std::printf("  (built without libwebp, skipping)\n");
+        return;
+    }
+    const char* path = "recorder_test.webp";
+    RecordOptions o;
+    o.path = path;
+    o.fps = 30;
+    o.width = 32;
+    o.quality = 50;
+    Recorder rec;
+    std::string err;
+    CHECK(rec.start(o, 64, 48, err));
+    int ow, oh;
+    Recorder::output_size(o, 64, 48, ow, oh);
+    CHECK_EQ(ow, 32);
+    CHECK_EQ(oh, 24);
+    std::vector<uint8_t> frame(64 * 48 * 3);
+    for (int i = 0; i < 12; ++i) {
+        for (size_t p = 0; p < frame.size(); p += 3) frame[p] = uint8_t(i * 20);  // changing red
+        CHECK(rec.add_frame(frame.data()));
+    }
+    CHECK(rec.finish(err));
+    CHECK(!rec.active());
+
+    FILE* f = std::fopen(path, "rb");
+    CHECK(f != nullptr);
+    if (!f) return;
+    std::vector<uint8_t> d(1 << 20);
+    d.resize(std::fread(d.data(), 1, d.size(), f));
+    std::fclose(f);
+    std::remove(path);
+    CHECK(d.size() > 12 && std::memcmp(d.data(), "RIFF", 4) == 0 && std::memcmp(d.data() + 8, "WEBP", 4) == 0);
+    // Walk the chunks: one ANIM with loop 0, one ANMF per frame, ~33 ms each.
+    int frames = 0, total_ms = 0, loop = -1;
+    for (size_t pos = 12; pos + 8 <= d.size();) {
+        uint32_t size = d[pos + 4] | d[pos + 5] << 8 | d[pos + 6] << 16 | uint32_t(d[pos + 7]) << 24;
+        if (std::memcmp(&d[pos], "ANIM", 4) == 0) loop = d[pos + 12] | d[pos + 13] << 8;
+        if (std::memcmp(&d[pos], "ANMF", 4) == 0) {
+            ++frames;
+            total_ms += d[pos + 20] | d[pos + 21] << 8 | d[pos + 22] << 16;
+        }
+        pos += 8 + size + (size & 1);
+    }
+    CHECK_EQ(loop, 0);
+    CHECK_EQ(frames, 12);
+    CHECK_EQ(total_ms, 400);  // 12 frames at 30 fps
 }

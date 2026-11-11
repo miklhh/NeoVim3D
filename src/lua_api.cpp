@@ -72,6 +72,29 @@ OptionDesc boolean(const char* name, bool Options::*field) {
             }};
 }
 
+// A vector option, written as {x, y[, z]} (missing components are 0).
+OptionDesc vec3(const char* name, Vec3 Options::*field) {
+    return {name,
+            [field](lua_State* L, Options& o) {
+                const Vec3& v = o.*field;
+                lua_createtable(L, 3, 0);
+                lua_pushnumber(L, v.x), lua_rawseti(L, -2, 1);
+                lua_pushnumber(L, v.y), lua_rawseti(L, -2, 2);
+                lua_pushnumber(L, v.z), lua_rawseti(L, -2, 3);
+            },
+            [field](lua_State* L, int idx, Options& o) {
+                if (!lua_istable(L, idx)) return false;
+                float v[3] = {0, 0, 0};
+                for (int i = 0; i < 3; ++i) {
+                    lua_rawgeti(L, idx, i + 1);
+                    v[i] = float(lua_tonumber(L, -1));
+                    lua_pop(L, 1);
+                }
+                o.*field = Vec3(v[0], v[1], v[2]);
+                return true;
+            }};
+}
+
 const std::vector<OptionDesc>& option_table() {
     static const std::vector<OptionDesc> t = {
         {"font", [](lua_State* L, Options& o) { lua_pushstring(L, o.font.c_str()); },
@@ -94,24 +117,8 @@ const std::vector<OptionDesc>& option_table() {
         boolean("panels", &Options::panels),
         boolean("cursor_blink", &Options::cursor_blink),
         boolean("follow_cursor", &Options::follow_cursor),
-        {"light_dir",
-         [](lua_State* L, Options& o) {
-             lua_createtable(L, 3, 0);
-             lua_pushnumber(L, o.light_dir.x), lua_rawseti(L, -2, 1);
-             lua_pushnumber(L, o.light_dir.y), lua_rawseti(L, -2, 2);
-             lua_pushnumber(L, o.light_dir.z), lua_rawseti(L, -2, 3);
-         },
-         [](lua_State* L, int idx, Options& o) {
-             if (!lua_istable(L, idx)) return false;
-             float v[3];
-             for (int i = 0; i < 3; ++i) {
-                 lua_rawgeti(L, idx, i + 1);
-                 v[i] = float(lua_tonumber(L, -1));
-                 lua_pop(L, 1);
-             }
-             o.light_dir = Vec3(v[0], v[1], v[2]);
-             return true;
-         }},
+        vec3("light_dir", &Options::light_dir),
+        vec3("follow_offset", &Options::follow_offset),
     };
     return t;
 }
@@ -324,6 +331,49 @@ int l_time(lua_State* L) {
     return 1;
 }
 
+int l_record_start(lua_State* L) {
+    RecordOptions o;
+    if (lua_isstring(L, 1)) {
+        o.path = lua_tostring(L, 1);
+    } else {
+        luaL_checktype(L, 1, LUA_TTABLE);
+        lua_getfield(L, 1, "path");
+        o.path = luaL_optstring(L, -1, "");
+        lua_pop(L, 1);
+        o.fps = int(field(L, 1, "fps", float(o.fps)));
+        o.width = int(field(L, 1, "width", 0));
+        o.colors = int(field(L, 1, "colors", float(o.colors)));
+        o.quality = int(field(L, 1, "quality", float(o.quality)));
+        o.method = int(field(L, 1, "method", float(o.method)));
+        lua_getfield(L, 1, "sharp_yuv");
+        if (!lua_isnil(L, -1)) o.sharp_yuv = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+        lua_getfield(L, 1, "dither");
+        o.dither = luaL_optstring(L, -1, o.dither.c_str());
+        lua_pop(L, 1);
+    }
+    if (o.path.empty()) return luaL_error(L, "nv3d.record.start: missing path");
+    std::string err;
+    if (!engine(L).host.record_start(o, err)) return luaL_error(L, "nv3d.record.start: %s", err.c_str());
+    return 0;
+}
+
+int l_record_stop(lua_State* L) {
+    std::string err;
+    if (!engine(L).host.record_stop(err)) return luaL_error(L, "nv3d.record.stop: %s", err.c_str());
+    return 0;
+}
+
+int l_record_active(lua_State* L) {
+    lua_pushboolean(L, engine(L).host.recording());
+    return 1;
+}
+
+int l_quit(lua_State* L) {
+    engine(L).host.quit();
+    return 0;
+}
+
 int l_print(lua_State* L) {
     std::string out;
     int n = lua_gettop(L);
@@ -354,7 +404,8 @@ LuaEngine::LuaEngine(LuaHost& h) : host(h), L_(luaL_newstate()) {
         {"set", l_set},         {"get", l_get},       {"cursor", l_cursor},
         {"map", l_map},         {"unmap", l_unmap},   {"on", l_on},
         {"off", l_off},         {"command", l_command}, {"input", l_input},
-        {"exec_lua", l_exec_lua}, {"time", l_time},   {nullptr, nullptr}};
+        {"exec_lua", l_exec_lua}, {"time", l_time},   {"quit", l_quit},
+        {nullptr, nullptr}};
     register_fns(L_, this, api);
 
     lua_newtable(L_);
@@ -365,6 +416,13 @@ LuaEngine::LuaEngine(LuaHost& h) : host(h), L_(luaL_newstate()) {
         {nullptr, nullptr}};
     register_fns(L_, this, cam);
     lua_setfield(L_, -2, "camera");
+
+    lua_newtable(L_);
+    static const luaL_Reg rec[] = {
+        {"start", l_record_start}, {"stop", l_record_stop}, {"active", l_record_active},
+        {nullptr, nullptr}};
+    register_fns(L_, this, rec);
+    lua_setfield(L_, -2, "record");
     lua_setglobal(L_, "nv3d");
 
     lua_pushlightuserdata(L_, this);

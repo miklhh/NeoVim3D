@@ -18,6 +18,16 @@ epoxy_dep = dependency('epoxy')
 freetype_dep = dependency('freetype2')
 fontconfig_dep = dependency('fontconfig')
 lua_dep = dependency('lua-5.4', 'lua5.4', 'lua54', 'lua', version: '>=5.4')
+# Optional: animated WebP recording (nv3d.record.start{path = 'x.webp'}).
+webp_dep = [
+  dependency('libwebp', required: get_option('webp')),
+  dependency('libwebpmux', required: get_option('webp')),
+]
+if webp_dep[0].found() and webp_dep[1].found()
+  add_project_arguments('-DNEOVIM3D_HAVE_WEBP', language: 'cpp')
+else
+  webp_dep = []
+endif
 
 earcut_inc = include_directories('third_party/earcut')
 
@@ -36,14 +46,15 @@ core_lib = static_library(
   'src/renderer.cpp',
   'src/app.cpp',
   'src/png.cpp',
+  'src/recorder.cpp',
   include_directories: earcut_inc,
-  dependencies: [threads_dep, glfw_dep, epoxy_dep, freetype_dep, fontconfig_dep, lua_dep],
+  dependencies: [threads_dep, glfw_dep, epoxy_dep, freetype_dep, fontconfig_dep, lua_dep, webp_dep],
 )
 
 core_dep = declare_dependency(
   link_with: core_lib,
   include_directories: include_directories('src'),
-  dependencies: [threads_dep, glfw_dep, epoxy_dep, freetype_dep, fontconfig_dep, lua_dep],
+  dependencies: [threads_dep, glfw_dep, epoxy_dep, freetype_dep, fontconfig_dep, lua_dep, webp_dep],
 )
 
 executable('neovim3d', 'src/main.cpp', dependencies: core_dep, install: true)

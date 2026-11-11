@@ -1,5 +1,7 @@
 # NeoVim3D
 
+![NeoVim3D typing a C++ program while the camera follows the cursor, with an LSP hover window floating above the code](docs/demo.webp)
+
 NeoVim3D is a Neovim *frontend*. It starts `nvim --embed` and talks to it over
 Neovim's msgpack-RPC UI protocol (`ext_linegrid` + `ext_multigrid`), the same way
 GUIs like Neovide and nvim-qt do. That is why everything Neovim does just works:
@@ -27,13 +29,16 @@ What NeoVim3D adds is the rendering:
 ## Building
 
 Dependencies: a C++20 compiler, Meson, Ninja, pkg-config, GLFW 3.3+, libepoxy,
-FreeType, Fontconfig, Lua 5.4, and Neovim 0.10+ at runtime.
+FreeType, Fontconfig, Lua 5.4, optionally libwebp (for `.webp` recordings), and
+Neovim 0.10+ at runtime (any install works,
+e.g. snap, AppImage or your distro's package; use `--nvim <path>` to pick one).
 
 On Debian/Ubuntu:
 
 ```sh
 sudo apt install meson ninja-build g++ pkg-config \
-    libglfw3-dev libepoxy-dev libfreetype-dev libfontconfig-dev liblua5.4-dev neovim
+    libglfw3-dev libepoxy-dev libfreetype-dev libfontconfig-dev liblua5.4-dev \
+    libwebp-dev
 ```
 
 Then:
@@ -61,6 +66,7 @@ All arguments not listed here are passed straight to `nvim`.
 | `--config <file>` | Frontend Lua config (default `~/.config/neovim3d/init.lua`) |
 | `--clean-3d` | Don't load the frontend Lua config |
 | `--screenshot-3d <file.png>` | Render once Neovim has drawn, save a PNG and exit |
+| `--size-3d <WxH>` | Initial window size (default 1280x800) |
 | `--help-3d`, `--version-3d` | Help / version |
 
 ### Camera controls
@@ -156,6 +162,9 @@ The 3D frontend is configured in Lua, in `~/.config/neovim3d/init.lua`. See
 | `nv3d.cursor()` → x, y, z | World position of the text cursor |
 | `nv3d.command(cmd)` / `nv3d.input(keys)` / `nv3d.exec_lua(code)` | Talk to Neovim |
 | `nv3d.time()` | Seconds since start |
+| `nv3d.record.start{path=, fps=20, width=, quality=75, method=4, sharp_yuv=true, colors=256}` | Record to `.webp` (built-in; `quality` 0–100, `method` 0–6 effort, `sharp_yuv` keeps coloured text crisp) or `.gif`/`.mp4` (via `ffmpeg`, `colors` for GIF); `width` scales the output |
+| `nv3d.record.stop()` / `.active()` | Finish the file / is a recording running |
+| `nv3d.quit()` | Close NeoVim3D |
 
 Options:
 
@@ -175,7 +184,48 @@ Options:
 | `panels` | `true` | Draw a backing slab behind each window |
 | `cursor_blink` | `true` | Honour `guicursor` blinking |
 | `follow_cursor` | `false` | Keep the camera centred on the cursor |
+| `follow_offset` | `{0, 0}` | Aim this far from the cursor when following (line units, `+y` = above) |
 | `msaa` | `4` | Multisampling (read at startup) |
+
+### Recording demos
+
+`nv3d.record.start{ path = 'out.webp' }` records what is rendered. Time advances
+in fixed steps of `1/fps` while recording, so the result plays back perfectly
+smoothly however long each frame took to render, and scripted keys sent with
+`nv3d.input` are waited on so every frame shows Neovim's response.
+
+* **`.webp`** (recommended for READMEs): an animated WebP, encoded in-process
+  with libwebp. True colour, about half the size of a GIF at twice the frame
+  rate, and it autoplays and loops like a GIF wherever images are shown.
+* **`.gif`**: via `ffmpeg`, with a two-pass palette tuned to what changes.
+* **`.mp4`** and other video formats: via `ffmpeg`.
+
+The animation at the top of this README is produced by a script:
+
+```sh
+examples/demo/record.sh            # writes docs/demo.webp (~20 MB, 30 fps, 26 s)
+examples/demo/record.sh demo.mp4   # or a GIF / an .mp4
+```
+
+[`examples/demo/demo.lua`](examples/demo/demo.lua) types
+[`hello.cpp`](examples/demo/hello.cpp) with natural pacing while the camera
+follows the cursor, opens the LSP hover window on `std::vector` (a floating
+window, so it hovers on its own layer while the camera swings round), saves
+with `:w hello-world.cpp` on the command line, and pulls back to show the
+whole program. The script checks that the saved file matches the source.
+
+Neovim runs with **your own config**, so your colour scheme, completion menu
+and LSP server (clangd for C++) are what the recording shows. The hover is
+opened with `<Space>i`; set `NV3D_DEMO_HOVER_KEYS` to your own mapping. For a
+recording that doesn't depend on personal config, use `NV3D_DEMO_CLEAN=1`
+(Neovim then runs with `--clean` plus [`nvim.lua`](examples/demo/nvim.lua),
+which sets up clangd from your `PATH` or Mason).
+
+A window opens while it records; it can be covered, but leave it alone until
+it closes. Tune the output with `NV3D_DEMO_QUALITY` (default 90),
+`NV3D_DEMO_FPS` (30), `NV3D_DEMO_WIDTH` (960) and `NV3D_DEMO_COLORS` (GIF).
+Larger files take longer to load for README visitors: quality 85 or 24 fps
+each bring the demo to ~16 MB.
 
 ### Driving the frontend from Neovim
 
@@ -208,5 +258,7 @@ end
 | `src/lua_api.*` | Embedded Lua 5.4 and the `nv3d` API |
 | `src/cinema.cpp` | Cinema mode (`nv3d.cinema`), written in embedded Lua |
 | `src/app.*` | Window, event loop and glue |
+| `src/recorder.*` | Recording: animated WebP via libwebp, GIF/video via `ffmpeg` |
 | `third_party/earcut` | [earcut.hpp](https://github.com/mapbox/earcut.hpp) polygon triangulation (ISC) |
+| `examples/demo/` | The scripted README demo and its recording script |
 | `tests/` | Unit tests and an end-to-end test against a real Neovim |

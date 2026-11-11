@@ -1,1 +1,2 @@
 option('tests', type: 'boolean', value: true, description: 'Build the unit tests')
+option('webp', type: 'feature', value: 'auto', description: 'Animated WebP recording (needs libwebp)')

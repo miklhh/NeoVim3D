@@ -9,6 +9,7 @@
 #include "camera.hpp"
 #include "msgpack.hpp"
 #include "options.hpp"
+#include "recorder.hpp"
 
 struct lua_State;
 
@@ -28,6 +29,10 @@ public:
     virtual void nvim_exec_lua(const std::string& code) = 0;
     virtual void message(const std::string& msg, bool error) = 0;
     virtual void request_redraw() = 0;
+    virtual bool record_start(const RecordOptions& opts, std::string& error) = 0;
+    virtual bool record_stop(std::string& error) = 0;
+    virtual bool recording() = 0;
+    virtual void quit() = 0;
 };
 
 class LuaEngine {

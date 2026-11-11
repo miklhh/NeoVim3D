@@ -79,6 +79,8 @@ bool parse_guifont(const std::string& value, std::string& family, float& points)
 App::App(AppConfig cfg) : cfg_(std::move(cfg)) { lua_ = std::make_unique<LuaEngine>(*this); }
 
 App::~App() {
+    std::string err;
+    if (recorder_.active() && !record_stop(err)) std::fprintf(stderr, "neovim3d: %s\n", err.c_str());
     nvim_.stop();  // before GLFW goes away: the reader thread wakes the event loop
     if (win_) {
         renderer_.destroy();
@@ -106,7 +108,40 @@ void App::nvim_command(const std::string& cmd) {
     });
 }
 
-void App::nvim_input(const std::string& keys) { nvim_.notify("nvim_input", {keys}); }
+void App::nvim_input(const std::string& keys) {
+    nvim_.notify("nvim_input", {keys});
+    input_sent_ = true;
+}
+
+void App::quit() {
+    if (win_) glfwSetWindowShouldClose(win_, GLFW_TRUE);
+}
+
+bool App::record_start(const RecordOptions& opts, std::string& error) {
+    if (!recorder_.start(opts, fb_w_, fb_h_, error)) return false;
+    frame_buf_.resize(size_t(fb_w_) * fb_h_ * 3);
+    sim_time_ = glfwGetTime();
+    // Frames are captured before the swap, so there is no need to wait for
+    // vsync, and compositors throttle hidden or unfocused windows, which
+    // would otherwise stall the recording.
+    glfwSwapInterval(0);
+    std::fprintf(stderr, "neovim3d: recording %dx%d @ %d fps to %s\n", fb_w_, fb_h_, opts.fps,
+                 opts.path.c_str());
+    return true;
+}
+
+bool App::record_stop(std::string& error) {
+    if (!recorder_.active()) return true;
+    int frames = recorder_.frames(), fps = recorder_.fps();
+    std::string path = recorder_.path();
+    std::fprintf(stderr, "neovim3d: encoding %d frames...\n", frames);
+    glfwSwapInterval(1);
+    if (!recorder_.finish(error)) return false;
+    message("neovim3d: recorded " + std::to_string(frames) + " frames (" +
+                std::to_string(frames / std::max(fps, 1)) + " s) to " + path,
+            false);
+    return true;
+}
 
 void App::nvim_exec_lua(const std::string& code) {
     nvim_.request("nvim_exec_lua", {code, mp::Array{}},
@@ -160,7 +195,7 @@ bool App::init_window() {
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
     glfwWindowHint(GLFW_SAMPLES, std::max(0, opt_.msaa));
     glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
-    win_ = glfwCreateWindow(1280, 800, "NeoVim3D", nullptr, nullptr);
+    win_ = glfwCreateWindow(cfg_.window_width, cfg_.window_height, "NeoVim3D", nullptr, nullptr);
     if (!win_) return false;
     glfwSetWindowUserPointer(win_, this);
     glfwMakeContextCurrent(win_);
@@ -265,7 +300,8 @@ int App::run() {
         double now = glfwGetTime();
         double next_blink = 0;
         bool want_blink = cursor_blink_visible(now, next_blink);
-        if (needs_draw_ || needs_scene_ || lua_->has_frame_hooks() || cam_.moving()) {
+        if (needs_draw_ || needs_scene_ || lua_->has_frame_hooks() || cam_.moving() ||
+            recorder_.active()) {
             glfwPollEvents();
         } else if (next_blink > now) {
             glfwWaitEventsTimeout(next_blink - now);
@@ -273,47 +309,90 @@ int App::run() {
             glfwWaitEvents();
         }
 
-        nvim_.dispatch(
-            [this](const std::string& m, const mp::Value& p) { handle_notification(m, p); },
-            [](const std::string&, const mp::Value&, mp::Value& error) {
-                error = mp::Array{0, "neovim3d does not handle requests"};
-                return mp::Value();
-            });
-        if (ui_.flushed) {
-            ui_.flushed = false;
-            if (ui_.generation != last_generation_) needs_scene_ = true;
-            if (first_flush_at_ == 0) {
-                first_flush_at_ = glfwGetTime();
-                rebuild_scene();
-                lua_->run_ready_hooks();
-            }
-        }
+        pump_nvim();
 
         now = glfwGetTime();
         double dt = std::min(now - last, 0.25);
         last = now;
+        if (recorder_.active()) {
+            // Fixed time steps: the video plays back smoothly however long
+            // each frame took to render and encode.
+            dt = 1.0 / recorder_.fps();
+            sim_time_ += dt;
+            now = sim_time_;
+        }
         want_blink = cursor_blink_visible(now, next_blink);
         if (want_blink != blink_visible) {
             blink_visible = want_blink;
             needs_scene_ = true;
         }
         if (lua_->has_frame_hooks()) {
+            input_sent_ = false;
             lua_->run_frame_hooks(dt, now);
             needs_draw_ = true;
+            // While recording, show the result of scripted keys in this frame.
+            if (input_sent_ && recorder_.active()) wait_for_redraw(0.5);
         }
         if (needs_scene_) {
             rebuild_scene();
             needs_draw_ = true;
         }
-        if (opt_.follow_cursor) cam_.goal.target = scene_.cursor_pos;
+        if (opt_.follow_cursor) cam_.goal.target = scene_.cursor_pos + opt_.follow_offset;
         if (cam_.update(float(dt))) needs_draw_ = true;
         if (!cfg_.screenshot_path.empty() && first_flush_at_ > 0 && now - first_flush_at_ > 1.5 &&
             (!cam_.moving() || lua_->has_frame_hooks()) && !needs_scene_) {
             return save_screenshot(cfg_.screenshot_path) ? 0 : 1;
         }
-        if (needs_draw_) draw();
+        if (needs_draw_ || recorder_.active()) draw();
     }
     return 0;
+}
+
+void App::pump_nvim() {
+    nvim_.dispatch(
+        [this](const std::string& m, const mp::Value& p) { handle_notification(m, p); },
+        [](const std::string&, const mp::Value&, mp::Value& error) {
+            error = mp::Array{0, "neovim3d does not handle requests"};
+            return mp::Value();
+        });
+    if (ui_.flushed) {
+        ui_.flushed = false;
+        ++flush_count_;
+        if (ui_.generation != last_generation_) needs_scene_ = true;
+        if (first_flush_at_ == 0) {
+            first_flush_at_ = glfwGetTime();
+            rebuild_scene();
+            lua_->run_ready_hooks();
+        }
+    }
+}
+
+void App::wait_for_redraw(double timeout) {
+    uint64_t before = flush_count_;
+    double deadline = glfwGetTime() + timeout;
+    while (flush_count_ == before && glfwGetTime() < deadline && !nvim_.exited()) {
+        glfwWaitEventsTimeout(0.005);
+        pump_nvim();
+    }
+    // Keys can trigger several flushes (e.g. mode change, then text); take a
+    // moment to collect the rest.
+    double settle = glfwGetTime() + 0.01;
+    while (glfwGetTime() < settle) {
+        glfwWaitEventsTimeout(0.002);
+        pump_nvim();
+    }
+}
+
+void App::capture_frame() {
+    if (fb_w_ != recorder_.width() || fb_h_ != recorder_.height()) return;  // resized: skip
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadBuffer(GL_BACK);
+    glReadPixels(0, 0, fb_w_, fb_h_, GL_RGB, GL_UNSIGNED_BYTE, frame_buf_.data());
+    if (!recorder_.add_frame(frame_buf_.data())) {
+        std::string err;
+        recorder_.finish(err);
+        message("neovim3d: recording stopped: ffmpeg is not accepting frames", true);
+    }
 }
 
 void App::handle_notification(const std::string& method, const mp::Value& params) {
@@ -413,6 +492,7 @@ void App::rebuild_scene() {
 
 void App::draw() {
     renderer_.draw(scene_, cam_, opt_, fb_w_, fb_h_, ui_.default_bg);
+    if (recorder_.active()) capture_frame();
     glfwSwapBuffers(win_);
     needs_draw_ = false;
 }

@@ -10,6 +10,7 @@
 #include "lua_api.hpp"
 #include "nvim.hpp"
 #include "options.hpp"
+#include "recorder.hpp"
 #include "renderer.hpp"
 #include "scene.hpp"
 #include "ui_state.hpp"
@@ -21,6 +22,7 @@ struct AppConfig {
     std::string config_path;  // empty = default location
     bool load_config = true;
     std::string screenshot_path;  // render once, save a PNG and exit
+    int window_width = 1280, window_height = 800;
     std::vector<std::string> nvim_args;
 };
 
@@ -43,6 +45,10 @@ public:
     void nvim_exec_lua(const std::string& code) override;
     void message(const std::string& msg, bool error) override;
     void request_redraw() override { needs_draw_ = true; }
+    bool record_start(const RecordOptions& opts, std::string& error) override;
+    bool record_stop(std::string& error) override;
+    bool recording() override { return recorder_.active(); }
+    void quit() override;
 
     // GLFW callbacks
     void on_key(int key, int scancode, int action, int mods);
@@ -56,6 +62,9 @@ private:
     bool init_window();
     void attach();
     void handle_notification(const std::string& method, const mp::Value& params);
+    void pump_nvim();
+    void wait_for_redraw(double timeout);
+    void capture_frame();
     void rebuild_scene();
     void draw();
     bool save_screenshot(const std::string& path);
@@ -97,6 +106,12 @@ private:
     int last_cursor_[3] = {-1, -1, -1};
     double cursor_moved_at_ = 0;
     double first_flush_at_ = 0;
+    uint64_t flush_count_ = 0;
+
+    Recorder recorder_;
+    bool input_sent_ = false;      // keys were sent to Nvim during this frame
+    double sim_time_ = 0;          // fixed-step clock used while recording
+    std::vector<uint8_t> frame_buf_;
 
     int mods_ = 0;
     double mouse_x_ = 0, mouse_y_ = 0;

@@ -2,3 +2,5 @@ build*/
 *.png
 !docs/*.png
 .cache/
+
+docs/*.webp

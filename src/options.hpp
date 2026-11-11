@@ -21,5 +21,6 @@ struct Options {
     bool panels = true;            // draw a backing slab behind every grid
     bool cursor_blink = true;
     bool follow_cursor = false;    // keep the camera target on the cursor
+    Vec3 follow_offset;            // ...shifted by this much (line units; +y = above)
     int msaa = 4;
 };
