@@ -1,13 +1,14 @@
-# NeoVim3D
+# NeoVim3D!
 
-![NeoVim3D typing a C++ program while the camera follows the cursor, with an LSP hover window floating above the code](docs/demo.webp)
+<img width="880" height="494" alt="NeoVim3D! typing a C++ program while the camera follows the cursor, with an LSP hover window floating above the code" src="https://github.com/user-attachments/assets/48214ffc-ea14-4949-b3bf-7047a09fc591" />
 
-NeoVim3D is a Neovim *frontend*. It starts `nvim --embed` and talks to it over
+
+NeoVim3D! is a Neovim *frontend*. It starts `nvim --embed` and talks to it over
 Neovim's msgpack-RPC UI protocol (`ext_linegrid` + `ext_multigrid`), the same way
 GUIs like Neovide and nvim-qt do. That is why everything Neovim does just works:
 keybindings, plugins, `:terminal`, LSP, and your existing `~/.config/nvim/init.lua`.
 
-What NeoVim3D adds is the rendering:
+What NeoVim3D! adds is the rendering:
 
 * Every glyph is a real 3D mesh. Font outlines (FreeType) are triangulated and
   extruded, so text has depth, side walls and lighting.
