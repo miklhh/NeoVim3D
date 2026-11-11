@@ -4,25 +4,29 @@
 -- Environment:
 --   NV3D_DEMO_SOURCE  file whose contents get typed (default: hello.cpp next to this script)
 --   NV3D_DEMO_OUT     output file: .webp, .gif or .mp4 (default: demo.webp)
---   NV3D_DEMO_WIDTH   output width in pixels (default: 960)
---   NV3D_DEMO_FPS     frames per second (default: 30)
---   NV3D_DEMO_QUALITY WebP quality 0-100 (default: 90; lower = smaller file)
+--   NV3D_DEMO_WIDTH   output width in pixels (default: 880, GitHub's README width)
+--   NV3D_DEMO_FPS     frames per second (default: 24)
+--   NV3D_DEMO_QUALITY WebP quality 0-100 (default: 82; lower = smaller file)
+-- The defaults keep the demo under GitHub's 10 MB limit for images.
 --   NV3D_DEMO_METHOD  WebP effort 0-6 (default: 4; 6 is ~7x slower for ~2% smaller)
 --   NV3D_DEMO_COLORS  GIF palette size (default: 128; fewer = smaller file)
 --   NV3D_DEMO_HOVER_KEYS  keys that open the LSP hover window (default: <Space>i)
+--   NV3D_DEMO_FONT    font family (default: MesloLGS NF; falls back to monospace)
 
 local script_dir = debug.getinfo(1, 'S').source:match('^@(.*/)') or './'
 local SOURCE = os.getenv('NV3D_DEMO_SOURCE') or (script_dir .. 'hello.cpp')
 local OUT = os.getenv('NV3D_DEMO_OUT') or 'demo.webp'
-local WIDTH = tonumber(os.getenv('NV3D_DEMO_WIDTH') or '960')
-local FPS = tonumber(os.getenv('NV3D_DEMO_FPS') or '30')
-local QUALITY = tonumber(os.getenv('NV3D_DEMO_QUALITY') or '90')
+local WIDTH = tonumber(os.getenv('NV3D_DEMO_WIDTH') or '880')
+local FPS = tonumber(os.getenv('NV3D_DEMO_FPS') or '24')
+local QUALITY = tonumber(os.getenv('NV3D_DEMO_QUALITY') or '82')
 local METHOD = tonumber(os.getenv('NV3D_DEMO_METHOD') or '4')
 local HOVER_KEYS = os.getenv('NV3D_DEMO_HOVER_KEYS') or '<Space>i'
 local COLORS = tonumber(os.getenv('NV3D_DEMO_COLORS') or '128')
 
 nv3d.set {
-  font_size = 18,
+  -- A Nerd Font, for the icons used by the completion menu, statusline etc.
+  font = os.getenv('NV3D_DEMO_FONT') or 'MesloLGS NF',
+  font_size = 16,  -- 12 pt (16 px at 96 DPI), where MesloLGS looks its best
   depth = 0.25,
   smoothing = 2,   -- slow, gliding camera
   cursor_blink = false,
@@ -57,9 +61,9 @@ math.randomseed(3)
 local function type_text(text)
   for ch in text:gmatch(utf8.charpattern) do
     keys(ch == '<' and '<lt>' or ch)
-    local d = 0.022 + math.random() * 0.025
-    if ch == ';' or ch == '{' or ch == '}' then d = d + 0.08 end
-    if ch == ' ' and math.random() < 0.15 then d = d + 0.06 end
+    local d = 0.019 + math.random() * 0.021
+    if ch == ';' or ch == '{' or ch == '}' then d = d + 0.07 end
+    if ch == ' ' and math.random() < 0.15 then d = d + 0.05 end
     wait(d)
   end
 end
@@ -90,7 +94,7 @@ local function type_program(source)
   for line in (source:gsub('\n$', '') .. '\n'):gmatch('(.-)\n') do
     if not first then
       keys(NEWLINE)
-      wait(0.16 + math.random() * 0.1)
+      wait(0.14 + math.random() * 0.08)
     end
     first = false
     sample_cursor() -- start of the line
@@ -127,9 +131,13 @@ local function scenario()
   wait(0.5)
   -- Swing round to the side so the gap between the window and the text
   -- shows, aiming at the middle of the (wide) hover window.
+  -- A quick glide, then a steady hold: still frames are cheap to encode,
+  -- a moving panel full of fine text is not.
+  nv3d.set('smoothing', 5)
   nv3d.set('follow_offset', { 21, -9 })
   nv3d.camera.set { yaw = 26, pitch = 16, distance = home.distance * 1.05 }
-  wait(3.4)
+  wait(2.8)
+  nv3d.set('smoothing', 2)
   keys('G') -- moving the cursor closes the hover window
   wait(0.5)
 

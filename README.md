@@ -203,7 +203,7 @@ smoothly however long each frame took to render, and scripted keys sent with
 The animation at the top of this README is produced by a script:
 
 ```sh
-examples/demo/record.sh            # writes docs/demo.webp (~20 MB, 30 fps, 26 s)
+examples/demo/record.sh            # writes docs/demo.webp (~9 MB, 24 fps, 24 s)
 examples/demo/record.sh demo.mp4   # or a GIF / an .mp4
 ```
 
@@ -222,10 +222,12 @@ recording that doesn't depend on personal config, use `NV3D_DEMO_CLEAN=1`
 which sets up clangd from your `PATH` or Mason).
 
 A window opens while it records; it can be covered, but leave it alone until
-it closes. Tune the output with `NV3D_DEMO_QUALITY` (default 90),
-`NV3D_DEMO_FPS` (30), `NV3D_DEMO_WIDTH` (960) and `NV3D_DEMO_COLORS` (GIF).
-Larger files take longer to load for README visitors: quality 85 or 24 fps
-each bring the demo to ~16 MB.
+it closes. Tune the output with `NV3D_DEMO_QUALITY` (default 82),
+`NV3D_DEMO_FPS` (24), `NV3D_DEMO_WIDTH` (880, the width of GitHub's README
+column) and `NV3D_DEMO_COLORS` (GIF). The defaults keep the file under
+GitHub's 10 MB limit for images with some margin; the camera moves almost all
+the time, which is what costs the bytes, so moments where it holds still
+(like the hover shot) are nearly free.
 
 ### Driving the frontend from Neovim
 
